@@ -1,5 +1,5 @@
 name: cqrs_offline_sync
-description: A starting point for Dart libraries or applications.
+description: Command-based offline-first sync runtime primitives for Dart apps.
 version: 1.0.0
 # repository: https://github.com/my_org/my_repo
 
