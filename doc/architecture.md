@@ -56,7 +56,14 @@ domain module's sync pieces:
 - rebuild graph
 
 The runtime ultimately consumes the collected pieces. Apps can use
-`SyncModuleRegistration` when it improves locality, or wire the pieces directly.
+`CqrsSyncRuntime.compose(...)` to build a ready runtime from a list of module
+registrations, stores, transaction runner, and transport, or they can wire the
+pieces directly for advanced customization.
+
+`CqrsSyncRuntime.compose(...)` is the recommended happy path. It validates the
+configuration, builds a shared `CommandCodecRegistry`, `CommandEnvelopeFactory`,
+`SyncUnitOfWork`, `ServerChangeApplier`, and `SyncRunner`, and exposes them for
+diagnostics and write-side units of work.
 
 ## Test Strategy
 

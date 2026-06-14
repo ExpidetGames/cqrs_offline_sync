@@ -14,11 +14,11 @@ import 'models/prepared_sync_batch.dart';
 /// Prepares sync batches, commits results, and manages outbox row lifecycle.
 ///
 /// All mutating operations run inside the host app's transaction via
-/// [SyncPersistenceTransactionRunner].
+/// [SyncTransactionRunner].
 class SyncUnitOfWork {
   /// Creates a unit of work backed by the given stores.
   SyncUnitOfWork({
-    required SyncPersistenceTransactionRunner transactionRunner,
+    required SyncTransactionRunner transactionRunner,
     required SyncOutboxStore outboxStore,
     required SyncStateStore syncStateStore,
     SyncConflictLogStore? conflictLogStore,
@@ -29,7 +29,7 @@ class SyncUnitOfWork {
        _conflictLogStore = conflictLogStore,
        _envelopeFactory = envelopeFactory;
 
-  final SyncPersistenceTransactionRunner _transactionRunner;
+  final SyncTransactionRunner _transactionRunner;
   final SyncOutboxStore _outboxStore;
   final SyncStateStore _syncStateStore;
   final SyncConflictLogStore? _conflictLogStore;
@@ -38,7 +38,7 @@ class SyncUnitOfWork {
   /// Prepares a batch for the next sync run.
   ///
   /// 1. Recovers abandoned `inFlight` rows to `pending`
-  /// 2. Reads the current cursor and epoch
+  /// 2. Reads the current cursor and epoch (or uses [sinceCursor] if provided)
   /// 3. Selects up to [commandLimit] pending commands
   /// 4. Marks selected rows as `inFlight`
   /// 5. Builds a [PreparedSyncBatch]
@@ -46,6 +46,7 @@ class SyncUnitOfWork {
     int commandLimit = 100,
     int pullLimit = 500,
     bool includePull = true,
+    SyncCursor? sinceCursor,
   }) async {
     if (commandLimit <= 0) {
       throw ArgumentError.value(commandLimit, 'commandLimit', 'Must be > 0.');
@@ -54,7 +55,7 @@ class SyncUnitOfWork {
     return _transactionRunner(() async {
       await _outboxStore.recoverInFlightToPending();
 
-      final SyncCursor sinceCursor =
+      final SyncCursor actualSinceCursor = sinceCursor ??
           await _syncStateStore.readLastServerCursorOrZero();
       final SyncEpoch syncEpoch =
           await _syncStateStore.readLastSyncEpochOrZero();
@@ -71,7 +72,7 @@ class SyncUnitOfWork {
 
       return PreparedSyncBatch(
         request: SyncBatchRequest(
-          sinceCursor: sinceCursor,
+          sinceCursor: actualSinceCursor,
           syncEpoch: syncEpoch,
           commands: pending
               .map((DecodedOutboxCommand entry) => entry.envelope)

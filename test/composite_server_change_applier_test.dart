@@ -44,7 +44,7 @@ void main() {
             RecordingTableChangeHandler(tableName: 'items'),
           ],
         ),
-        throwsStateError,
+        throwsArgumentError,
       );
     });
 

@@ -27,6 +27,9 @@ This document maps every public export of `cqrs_offline_sync` to its subsystem a
 ### `sync_command_writer.dart`
 - **`SyncCommandWriter`** — contract for appending a command envelope to outbox storage
 
+### `persistent_sync_command_writer.dart`
+- **`PersistentSyncCommandWriter`** — `SyncCommandWriter` that reads the current cursor from `SyncStateStore` and wraps payloads with `CommandEnvelopeFactory`
+
 ## Persistence (`src/persistence/`)
 
 ### `sync_outbox_store.dart`
@@ -36,13 +39,19 @@ This document maps every public export of `cqrs_offline_sync` to its subsystem a
 - **`SyncStateStore`** — read/write `lastServerCursor` monotonically; read/write `syncEpoch`
 
 ### `sync_conflict_log_store.dart`
-- **`SyncConflictLogStore`** — audit log for conflict decisions
+- **`SyncConflictLogStore`** — audit log for conflict decisions; now includes `clear()`
 
 ### `sync_rebuild_instruction_store.dart`
 - **`SyncRebuildInstructionStore`** — persist and consume `RebuildInstruction` objects for stale recovery
 
+### `noop_sync_conflict_log_store.dart`
+- **`NoopSyncConflictLogStore`** — default no-op implementation of `SyncConflictLogStore`
+
+### `noop_sync_rebuild_instruction_store.dart`
+- **`NoopSyncRebuildInstructionStore`** — default no-op implementation of `SyncRebuildInstructionStore`
+
 ### `sync_transaction_runner.dart`
-- **`SyncTransactionRunner`** — runs a callback inside the host app's database transaction
+- **`SyncTransactionRunner`** — runs a callback inside the host app's database transaction (used by both sync commits and write-side UoW)
 
 ## Protocol / Transport DTOs (`src/protocol/`)
 
@@ -56,20 +65,37 @@ This document maps every public export of `cqrs_offline_sync` to its subsystem a
 
 ### `sync_batch_response.dart`
 - **`SyncBatchResponse`** — `commandResults`, `changes`, `newCursor`, `hasMore`, `resyncRequired`, `expectedSyncEpoch`
+- **`SyncCommandResult`** — per-command result; includes `reasonCode` for machine-readable routing
+
+### `sync_command_result_reason_codes.dart`
+- **`SyncCommandResultReasonCodes`** — stable reason code constants, e.g. `recoverableMissingRow`
 
 ### `sync_bootstrap_replace_request.dart`
-- **`SyncBootstrapReplaceRequest`** — `snapshot` map, `expectedSyncEpoch`
+- **`SyncBootstrapReplaceRequest`** — `snapshot` map, `expectedSyncEpoch`, `confirmationToken`
+- **`SyncBootstrapReplaceSnapshot`** / **`SyncBootstrapReplaceTableSnapshot`** — generic local snapshot shapes
 
 ### `sync_bootstrap_replace_response.dart`
-- **`SyncBootstrapReplaceResponse`** — `success`, `newSyncEpoch`, `appliedCount`
+- **`SyncBootstrapReplaceResponse`** — `newCursor`, `newSyncEpoch`
 
 ### `sync_cursor.dart`
-- **`SyncCursor`** — typed wrapper around `int` cursor values with comparison helpers
+- **`SyncCursor`** / **`SyncEpoch`** — typed wrappers around numeric values with comparison helpers
 
-## Runtime Auth (`src/runtime/auth/`)
+## Runtime Local Data (`src/runtime/local_data/`)
 
 ### `local_data_scope.dart`
-- **`LocalDataScope`** — per-module `hasData()` / `clear()` contract; `id` is a `String` (host app maps from its own enum)
+- **`LocalDataScope`** — per-module `hasData()` / `clear()` contract; `id` is a `String`
+
+## Runtime Composition (`src/runtime/composition/`)
+
+### `cqrs_sync_runtime.dart`
+- **`CqrsSyncRuntime`** — host-agnostic composition facade; `CqrsSyncRuntime.compose(...)` is the main entrypoint
+- **`SyncStores`** — immutable collection of outbox, state, conflict log, and rebuild instruction stores
+- **`SyncRuntimeContributions`** — extra codecs, handlers, profiles, scopes, and rebuild edges beyond module contributions
+- **`SyncRuntimeQueueReset`** — clears outbox, conflict log, and rebuild instructions without touching sync state
+- **`LocalDataResetService`** — generic reset orchestrator for registered `LocalDataScope`s
+- **`SyncChangeApplicationConfig`** — change application configuration, including `SyncDeleteRebuild` policy
+- **`SyncConflictResolution`** — sealed configuration for stale conflict resolution (auto / disabled / defaults / custom)
+- **`SyncRuntimeConfigurationException`** — exception thrown for invalid `compose(...)` configuration
 
 ## Runtime Change Applier (`src/runtime/change_applier/`)
 
@@ -78,6 +104,7 @@ This document maps every public export of `cqrs_offline_sync` to its subsystem a
 
 ### `server_change_decision_policy.dart`
 - **`ServerChangeDecisionPolicy`** — `applyServer` vs `keepLocal` hook
+- **`AlwaysApplyServerChangeDecisionPolicy`** — default policy that always applies server changes
 
 ### `server_change_row_reader.dart`
 - **`ServerChangeRowReader`** — strict typed reader for `UpsertServerChange.row` maps with alias support
@@ -99,23 +126,36 @@ This document maps every public export of `cqrs_offline_sync` to its subsystem a
 ### `conflict_resolver.dart`
 - **`ConflictResolver`** — contract: `resolve(context)` -> `ConflictResolutionPlan`
 
+### `default_conflict_resolver.dart`
+- **`DefaultConflictResolver`** — ready-to-use resolver that routes stale commands through profiles based on a `SyncStaleRoutingPolicy`
+
 ### `drop_stale_conflict_profile.dart`
-- **`DropStaleConflictProfile`** — profile that always drops (acks) stale commands
+- **`DropStaleConflictProfile`** / **`DropTypedStaleConflictProfile`** — profile that always drops (acks) stale commands
 
 ### `requeued_command.dart`
 - **`RequeuedCommand`** — wrapper for a replayed/rebuilt command with its fresh envelope
 
 ### `replay_stale_conflict_profile.dart`
-- **`ReplayStaleConflictProfile`** — profile that replays the same payload with a fresh cursor
+- **`ReplayStaleConflictProfile`** / **`ReplayTypedStaleConflictProfile`** — profile that replays the same payload with a fresh cursor
 
 ### `resolution_decision.dart`
-- **`ResolutionDecision`** — `ack`, `replay`, `rebuild`, `fail`
+- **`ResolutionDecision`** — `drop`, `replay`, `rebuild`
 
 ### `stale_conflict_profile.dart`
 - **`StaleConflictProfile`** — base contract for per-command-type stale resolution logic
+- **`TypedStaleConflictProfile<T>`** — typed base class that casts payload before delegating to `resolveTyped`
 
 ### `stale_conflict_profile_registry.dart`
-- **`StaleConflictProfileRegistry`** — maps `commandType` to profile
+- **`StaleConflictProfileRegistry`** — maps `commandType` to profile; now throws `ArgumentError` on duplicate command types
+
+### `stale_conflict_routing_context.dart`
+- **`StaleConflictRoutingContext`** — context for `SyncStaleRoutingPolicy` decisions
+
+### `sync_stale_routing_policy.dart`
+- **`SyncStaleRoutingPolicy`** — policy class for routing stale conflicts to profiles
+  - **`recoverableMissingRowOnly(...)`** — route only `reasonCode == recoverable_missing_row`, with optional legacy `reason` prefix fallback
+  - **`alwaysRoute()`** — route every stale command to its profile
+  - **`custom(...)`** — user-supplied predicate
 
 ## Runtime Rebuild (`src/runtime/rebuild/`)
 
@@ -128,12 +168,21 @@ This document maps every public export of `cqrs_offline_sync` to its subsystem a
 ### `rebuild_graph.dart`
 - **`RebuildGraph`** — graph of entity nodes with `loadAll()` / `toSnapshot()` for delete-rebuild and bootstrap-replace
 - **`RebuildGraphNode`** — single node: table name, parent relation, projection
+- **`RebuildGraphEdge`** — parent-child edge for subtree traversal
 
 ### `rebuild_instructions.dart`
 - **`RebuildInstruction`** / **`RebuildInstructions`** — data classes describing how to recreate a deleted subtree
 
 ### `server_change_applier.dart`
 - **`ServerChangeApplier`** — contract for the apply phase: `apply(changes)` -> `ServerChangeApplyResult`
+
+## Runtime Bootstrap (`src/runtime/bootstrap/`)
+
+### `sync_bootstrap_replace_client.dart`
+- **`SyncBootstrapReplaceClient`** — host-provided client contract for the bootstrap-replace endpoint
+
+### `sync_bootstrap_replace_service.dart`
+- **`SyncBootstrapReplaceService`** — builds a snapshot from `RebuildGraph`, calls the client, and persists the new cursor/epoch
 
 ## Runtime Orchestration (`src/runtime/`)
 

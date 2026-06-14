@@ -108,7 +108,7 @@ class CreateModuleCommand extends Command<void> {
 
     final localScopePath = p.join(
       baseDir.path,
-      'runtime/auth',
+      'runtime/local_data',
       '${moduleName}_local_data_scope.dart',
     );
     if (!File(localScopePath).existsSync()) {
@@ -332,7 +332,7 @@ class CreateCommandSubCommand extends Command<void> {
 
     final buffer = StringBuffer()
       ..writeln("import 'package:cqrs_offline_sync/cqrs_offline_sync.dart';")
-      ..writeln("import 'package:${config.projectPackage}/$importRoot/runtime/auth/${moduleName}_local_data_scope.dart';")
+      ..writeln("import 'package:${config.projectPackage}/$importRoot/runtime/local_data/${moduleName}_local_data_scope.dart';")
       ..writeln("import 'package:${config.projectPackage}/$importRoot/runtime/rebuild/${moduleName}_rebuild_graph.dart';")
       ..writeln("import 'package:${config.projectPackage}/$importRoot/runtime/conflict/profiles/${moduleName}/${moduleName}_stale_conflict_profiles.dart';")
       ..writeln();

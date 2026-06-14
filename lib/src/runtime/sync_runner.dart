@@ -1,5 +1,6 @@
 import '../persistence/sync_rebuild_instruction_store.dart';
 import '../protocol/sync_batch_response.dart';
+import '../protocol/sync_cursor.dart';
 import '../uow/sync_trigger_sink.dart';
 import 'conflict/conflict_resolution_context.dart';
 import 'conflict/conflict_resolution_plan.dart';
@@ -63,53 +64,66 @@ class SyncRunner {
   }
 
   Future<void> _doRun(SyncTriggerReason reason, {required int pullLimit}) async {
-    final PreparedSyncBatch batch = await _unitOfWork.prepareBatch(pullLimit: pullLimit);
-    if (batch.request.isEmpty) {
-      return;
-    }
+    SyncCursor? nextSinceCursor;
 
-    SyncBatchResponse response;
-    try {
-      response = await _transport.pushPull(batch.request);
-    } catch (error) {
-      await _unitOfWork.commitFailure(batch: batch, error: error);
-      return;
-    }
-
-    if (response.isResyncRequired) {
-      final SyncResyncHandler? handler = _resyncHandler;
-      if (handler != null && response.expectedSyncEpoch != null) {
-        await handler.onResyncRequired(response.expectedSyncEpoch!);
-      }
-      return;
-    }
-
-    await _changeApplier.apply(response.changes);
-
-    final ConflictResolver? resolver = _conflictResolver;
-    if (resolver != null && response.commandResults.isNotEmpty) {
-      final RebuildInstructions rebuildInstructions =
-          await _rebuildInstructionStore?.readAll() ?? RebuildInstructions.empty;
-
-      final ConflictResolutionContext context = ConflictResolutionContext(
-        batch: batch,
-        response: response,
-        requeueBaseCursor: response.newCursor,
-        rebuildInstructions: rebuildInstructions,
+    while (true) {
+      final PreparedSyncBatch batch = await _unitOfWork.prepareBatch(
+        pullLimit: pullLimit,
+        sinceCursor: nextSinceCursor,
       );
-
-      final ConflictResolutionPlan plan = await resolver.resolve(context);
-      await _unitOfWork.commitResolved(
-        batch: batch,
-        response: response,
-        plan: plan,
-      );
-
-      if (!await _unitOfWork.hasUnsettledOutboxCommands()) {
-        await _rebuildInstructionStore?.clear();
+      if (batch.request.isEmpty) {
+        return;
       }
-    } else {
-      await _unitOfWork.commitSuccess(batch, response);
+
+      SyncBatchResponse response;
+      try {
+        response = await _transport.pushPull(batch.request);
+      } catch (error) {
+        await _unitOfWork.commitFailure(batch: batch, error: error);
+        return;
+      }
+
+      if (response.isResyncRequired) {
+        final SyncResyncHandler? handler = _resyncHandler;
+        if (handler != null && response.expectedSyncEpoch != null) {
+          await handler.onResyncRequired(response.expectedSyncEpoch!);
+        }
+        return;
+      }
+
+      await _changeApplier.apply(response.changes);
+
+      final ConflictResolver? resolver = _conflictResolver;
+      if (resolver != null && response.commandResults.isNotEmpty) {
+        final RebuildInstructions rebuildInstructions =
+            await _rebuildInstructionStore?.readAll() ?? RebuildInstructions.empty;
+
+        final ConflictResolutionContext context = ConflictResolutionContext(
+          batch: batch,
+          response: response,
+          requeueBaseCursor: response.newCursor,
+          rebuildInstructions: rebuildInstructions,
+        );
+
+        final ConflictResolutionPlan plan = await resolver.resolve(context);
+        await _unitOfWork.commitResolved(
+          batch: batch,
+          response: response,
+          plan: plan,
+        );
+
+        if (!await _unitOfWork.hasUnsettledOutboxCommands()) {
+          await _rebuildInstructionStore?.clear();
+        }
+      } else {
+        await _unitOfWork.commitSuccess(batch, response);
+      }
+
+      if (!response.hasMore) {
+        return;
+      }
+
+      nextSinceCursor = response.newCursor;
     }
   }
 }

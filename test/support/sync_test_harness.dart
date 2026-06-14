@@ -297,6 +297,11 @@ class RecordingSyncConflictLogStore implements SyncConflictLogStore {
     );
     return decisions.length;
   }
+
+  @override
+  Future<void> clear() async {
+    decisions.clear();
+  }
 }
 
 class RecordedConflictDecision {

@@ -6,13 +6,14 @@ This package provides the **primitives and contracts** that a host app wires to 
 
 ## What this package does
 
-- **Command envelope encoding** — typed `SyncCommand` payloads with per-type codecs
-- **Outbox persistence contracts** — `SyncOutboxStore`, `SyncStateStore`, `SyncConflictLogStore`, `SyncRebuildInstructionStore`
-- **Batch preparation & commit** — `SyncUnitOfWork` locks pending rows, builds `SyncBatchRequest`, and commits results
-- **Server change application** — `CompositeServerChangeApplier` routes feed rows to per-table `SyncTableChangeHandler`s
-- **Stale conflict resolution** — profile-based `ConflictResolver` decides whether to ack, replay, or rebuild a stale command
-- **Delete-rebuild planning** — `RebuildGraph` / `DeleteRebuildPlanner` capture and replay lost subtrees
-- **Resync & bootstrap-replace DTOs** — transport-neutral request/response shapes
+- **Command envelope encoding** — typed `SyncCommand` payloads with per-type codecs.
+- **Outbox persistence contracts** — `SyncOutboxStore`, `SyncStateStore`, `SyncConflictLogStore`, `SyncRebuildInstructionStore`.
+- **Batch preparation & commit** — `SyncUnitOfWork` locks pending rows, builds `SyncBatchRequest`, and commits results.
+- **Server change application** — `CompositeServerChangeApplier` routes feed rows to per-table `SyncTableChangeHandler`s.
+- **Stale conflict resolution** — profile-based `ConflictResolver` decides whether to ack, replay, or rebuild a stale command; `DefaultConflictResolver` provides a ready-to-use implementation.
+- **Delete-rebuild planning** — `RebuildGraph` / `DeleteRebuildPlanner` capture and replay lost subtrees.
+- **Resync & bootstrap-replace DTOs** — transport-neutral request/response shapes, plus `SyncBootstrapReplaceService` for device-wins flows.
+- **Runtime composition** — `CqrsSyncRuntime.compose(...)` collects modules, stores, transport, and policies into a single facade.
 
 ## Installation
 
@@ -26,12 +27,12 @@ dependencies:
 
 ## Quick integration checklist
 
-1. **Implement `SyncOutboxStore`, `SyncStateStore`** on your database
-2. **Register command codecs** in a `CommandCodecRegistry`
-3. **Implement `SyncTableChangeHandler`** for each syncable table
-4. **Register modules** via `SyncModuleRegistration`
-5. **Wire `SyncRunner`** with your transport (`SyncTransport`) and change applier
-6. **Trigger sync** from your scheduler / write-commit hooks (`SyncTriggerSink`)
+1. **Implement `SyncOutboxStore`, `SyncStateStore`** on your database.
+2. **Register command codecs** in a `CommandCodecRegistry` (or via `SyncModuleRegistration`).
+3. **Implement `SyncTableChangeHandler`** for each syncable table.
+4. **Register modules** via `SyncModuleRegistration`.
+5. **Compose `CqrsSyncRuntime`** with your stores, transaction runner, and transport.
+6. **Trigger sync** from your scheduler / write-commit hooks (`SyncTriggerSink`).
 
 ## Core abstractions
 
@@ -57,10 +58,11 @@ dependencies:
 
 | Class | Responsibility |
 |---|---|
-| `SyncRunner` | Coalesced `runOnce()` loop: prepare → transport → apply → resolve → commit |
+| `CqrsSyncRuntime` | Composition facade built from modules, stores, transport, and policies |
+| `SyncRunner` | Coalesced `runOnce()` loop: prepare → transport → apply → resolve → commit; supports pull pagination |
 | `SyncUnitOfWork` | Batch lifecycle: `prepareBatch`, `commitSuccess`, `commitFailure`, `commitResolved` |
 | `CompositeServerChangeApplier` | Two-pass apply: capture delete-rebuild, then dispatch to handlers |
-| `ConflictResolver` | Profile-driven stale resolution returning `ConflictResolutionPlan` |
+| `ConflictResolver` / `DefaultConflictResolver` | Profile-driven stale resolution returning `ConflictResolutionPlan` |
 | `SyncResyncHandler` | Callback when server signals `resync_required` |
 
 ### Auth / local data boundaries
@@ -69,59 +71,49 @@ dependencies:
 |---|---|
 | `LocalDataScope` | Per-module `hasData()` + `clear()` for login/logout/delete-account flows |
 | `SyncModuleRegistration` | One per module: codecs, handlers, profiles, scope, rebuild graph |
+| `LocalDataResetService` | Generic reset orchestrator built from registered `LocalDataScope`s |
+| `SyncRuntimeQueueReset` | Clears runtime queues (outbox, conflict log, rebuild instructions) |
 
-## Example: minimal module registration
-
-```dart
-class VocabTrainerModule implements SyncModuleRegistration {
-  @override
-  String get moduleId => 'vocab_trainer';
-
-  @override
-  List<AnyCommandCodec> get commandCodecs => [
-    CommandPayloadCodec<CreateChapterCommand>(
-      commandType: 'vocab_trainer.create_chapter',
-      aggregateType: 'vocab_trainer',
-      fromJson: CreateChapterCommand.fromJson,
-      toJson: (c) => c.toJson(),
-    ),
-  ];
-
-  @override
-  List<SyncTableChangeHandler> get tableChangeHandlers => [
-    UserChaptersTableChangeHandler(db),
-    UserVocabsTableChangeHandler(db),
-  ];
-
-  @override
-  List<StaleConflictProfile> get staleConflictProfiles => [
-    VocabTrainerStaleProfiles.all,
-  ];
-
-  @override
-  LocalDataScope get localDataScope => VocabTrainerLocalDataScope(db);
-
-  @override
-  RebuildGraph get rebuildGraph => vocabTrainerRebuildGraph;
-}
-```
-
-## Running a sync cycle
+## Example: composed runtime
 
 ```dart
-final runner = SyncRunner(
-  unitOfWork: myUnitOfWork,
-  transport: myTransport,
-  changeApplier: myChangeApplier,
-  conflictResolver: myConflictResolver,
-  resyncHandler: myResyncHandler,
+final runtime = CqrsSyncRuntime.compose(
+  modules: [vocabTrainerModule, latinTextsModule],
+  stores: SyncStores(
+    outbox: myOutboxStore,
+    state: myStateStore,
+    conflictLog: myConflictLogStore,
+    rebuildInstructions: myRebuildInstructionStore,
+  ),
+  transactionRunner: myDatabase.transactionRunner,
+  transport: mySyncTransport,
+  conflictResolution: const SyncConflictResolution.auto(),
 );
 
-// Called from your scheduler or after a local write commits
-await runner.runOnce(SyncTriggerReason.localWriteCommitted);
+// Pull changes / push pending commands
+await runtime.runner.runOnce(SyncTriggerReason.manual);
+
+// Domain write
+await runtime.createWriteUnitOfWork().runVoidWithCommand(
+  writeLocal: () async { /* local db write */ },
+  command: myCommand,
+);
 ```
+
+## CLI scaffolding
+
+Run the CLI from a host project root:
+
+```bash
+dart run cqrs_offline_sync:cqrs_sync init \
+  --root lib/sync \
+  --project my_app
+```
+
+This creates `sync_config.yaml` and a `sync_runtime.dart` entrypoint that uses `CqrsSyncRuntime.compose(...)`.
 
 ## Next steps
 
 - Read [`architecture.md`](architecture.md) for the full sync pipeline, conflict model, and rebuild mechanics.
 - Read [`api_overview.md`](api_overview.md) for a per-file summary of every public API.
+- See `example/cqrs_offline_sync_example.dart` for a runnable in-memory notes sync example.

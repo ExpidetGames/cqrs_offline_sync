@@ -14,6 +14,9 @@ class ReplayStaleConflictProfile implements StaleConflictProfile {
   String get commandType => '*';
 
   @override
+  bool get requiresRebuildInstructions => false;
+
+  @override
   Future<ResolutionDecision<SyncCommand>> resolve(StaleConflictProfileContext context) async {
     return ReplaySameResolutionDecision<SyncCommand>(
       rebuildContext: context.rebuildContext,
@@ -29,6 +32,9 @@ class ReplayTypedStaleConflictProfile<TCommand extends SyncCommand> extends Type
 
   @override
   final String commandType;
+
+  @override
+  bool get requiresRebuildInstructions => false;
 
   @override
   Future<ResolutionDecision<TCommand>> resolveTyped(TypedStaleConflictProfileContext<TCommand> context) async {

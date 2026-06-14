@@ -14,6 +14,9 @@ class DropStaleConflictProfile implements StaleConflictProfile {
   String get commandType => '*';
 
   @override
+  bool get requiresRebuildInstructions => false;
+
+  @override
   Future<ResolutionDecision<SyncCommand>> resolve(StaleConflictProfileContext context) async {
     return DropResolutionDecision<SyncCommand>(reason: context.result.reason ?? 'Command stale; dropping intent.');
   }
@@ -26,6 +29,9 @@ class DropTypedStaleConflictProfile<TCommand extends SyncCommand> extends TypedS
 
   @override
   final String commandType;
+
+  @override
+  bool get requiresRebuildInstructions => false;
 
   @override
   Future<ResolutionDecision<TCommand>> resolveTyped(TypedStaleConflictProfileContext<TCommand> context) async {

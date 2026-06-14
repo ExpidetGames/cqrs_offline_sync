@@ -56,11 +56,24 @@ class InitCommand extends Command<void> {
     _writeReadme(baseDir, 'commands', commandsReadme);
     _writeReadme(baseDir, 'runtime/change_applier', changeApplierReadme);
     _writeReadme(baseDir, 'runtime/conflict/profiles', conflictProfilesReadme);
-    _writeReadme(baseDir, 'runtime/auth', authReadme);
+    _writeReadme(baseDir, 'runtime/local_data', localDataReadme);
     _writeReadme(baseDir, 'runtime/rebuild', rebuildReadme);
-    _writeReadme(baseDir, 'outbox', outboxReadme);
-    _writeReadme(baseDir, 'providers', providersReadme);
-    _writeReadme(baseDir, 'database', databaseReadme);
+    _writeReadme(baseDir, 'stores', storesReadme);
+
+    // Root entrypoint and README
+    final syncRuntimePath = p.join(baseDir.path, 'sync_runtime.dart');
+    if (!File(syncRuntimePath).existsSync()) {
+      File(syncRuntimePath).writeAsStringSync(
+        syncRuntimeTemplate(projectPackage: project),
+      );
+      stdout.writeln('  Created ${root}/sync_runtime.dart');
+    }
+
+    final rootReadmePath = p.join(baseDir.path, 'README.md');
+    if (!File(rootReadmePath).existsSync()) {
+      File(rootReadmePath).writeAsStringSync(syncRuntimeReadme);
+      stdout.writeln('  Created ${root}/README.md');
+    }
 
     stdout.writeln('Sync file structure created under \u001b[34m$root\u001b[0m');
   }

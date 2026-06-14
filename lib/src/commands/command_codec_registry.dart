@@ -111,15 +111,45 @@ class DecodedCommandEnvelope {
 class CommandCodecRegistry {
   /// Creates a registry from a list of codecs.
   ///
-  /// Throws [StateError] if [codecs] contains duplicate [commandType] values.
+  /// Throws [ArgumentError] if [codecs] contains duplicate [commandType]
+  /// values.
   CommandCodecRegistry(Iterable<AnyCommandCodec> codecs)
-    : _byCommandType = {for (final codec in codecs) codec.commandType: codec},
-      _byPayloadType = {for (final codec in codecs) codec.payloadType: codec} {
+    : _byCommandType = _buildByCommandType(codecs),
+      _byPayloadType = _buildByPayloadType(codecs) {
     if (_byCommandType.length != codecs.length) {
-      throw StateError(
+      throw ArgumentError.value(
+        codecs,
+        'codecs',
         'Duplicate commandType entries in CommandCodecRegistry.',
       );
     }
+    if (_byPayloadType.length != codecs.length) {
+      throw ArgumentError.value(
+        codecs,
+        'codecs',
+        'Duplicate payloadType entries in CommandCodecRegistry.',
+      );
+    }
+  }
+
+  static Map<String, AnyCommandCodec> _buildByCommandType(
+    Iterable<AnyCommandCodec> codecs,
+  ) {
+    final Map<String, AnyCommandCodec> map = <String, AnyCommandCodec>{};
+    for (final AnyCommandCodec codec in codecs) {
+      map[codec.commandType] = codec;
+    }
+    return map;
+  }
+
+  static Map<Type, AnyCommandCodec> _buildByPayloadType(
+    Iterable<AnyCommandCodec> codecs,
+  ) {
+    final Map<Type, AnyCommandCodec> map = <Type, AnyCommandCodec>{};
+    for (final AnyCommandCodec codec in codecs) {
+      map[codec.payloadType] = codec;
+    }
+    return map;
   }
 
   final Map<String, AnyCommandCodec> _byCommandType;

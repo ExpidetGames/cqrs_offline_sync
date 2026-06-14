@@ -29,4 +29,7 @@ abstract interface class SyncConflictLogStore {
     DateTime? localModifiedAtUtc,
     DateTime? serverModifiedAtUtc,
   });
+
+  /// Removes all recorded decisions.
+  Future<void> clear();
 }

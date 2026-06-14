@@ -1,62 +1,49 @@
 import 'package:cqrs_offline_sync/cqrs_offline_sync.dart';
 
 Future<void> main() async {
+  // Host-app provided stores and transport.
   final notesStore = InMemoryNotesStore();
-  final outboxStore = InMemoryOutboxStore();
-  final stateStore = InMemorySyncStateStore();
   final server = InMemoryNotesServer();
   final triggerSink = RecordingTriggerSink();
 
-  final registry = CommandCodecRegistry(<AnyCommandCodec>[
-    createNoteCommandCodec,
-  ]);
-  final envelopeFactory = CommandEnvelopeFactory(
-    codecRegistry: registry,
-    opIdGenerator: SequentialOpIdGenerator(),
-    clock: FixedClock(DateTime.utc(2026, 1, 1)),
-  );
-  final commandWriter = PersistentSyncCommandWriter(
-    stateStore: stateStore,
-    outboxStore: outboxStore,
-    envelopeFactory: envelopeFactory,
-  );
-  final writeUnitOfWork = SyncWriteUnitOfWork(
+  // Compose the runtime from modules, stores, transaction runner, and transport.
+  final runtime = CqrsSyncRuntime.compose(
+    modules: [
+      NotesSyncModule(
+        outboxStore: server.outboxStore,
+        stateStore: server.stateStore,
+        notesStore: notesStore,
+      ),
+    ],
+    stores: SyncStores(
+      outbox: server.outboxStore,
+      state: server.stateStore,
+    ),
     transactionRunner: runInMemoryTransaction,
-    commandWriter: commandWriter,
-    triggerSink: triggerSink,
-  );
-  final runner = SyncRunner(
-    unitOfWork: SyncUnitOfWork(
-      transactionRunner: runInMemoryTransaction,
-      outboxStore: outboxStore,
-      syncStateStore: stateStore,
-      envelopeFactory: envelopeFactory,
-    ),
     transport: server,
-    changeApplier: CompositeServerChangeApplier(
-      handlers: <SyncTableChangeHandler>[NotesTableChangeHandler(notesStore)],
-    ),
   );
 
+  // Domain write: local db mutation + outbox command via the write unit of work.
   print('Local write: create note n1');
-  await writeUnitOfWork.runVoidWithCommand(
+  await runtime.createWriteUnitOfWork(triggerSink: triggerSink).runVoidWithCommand(
     writeLocal: () => notesStore.upsert(const Note(id: 'n1', text: 'Salve')),
     command: const CreateNoteCommand(id: 'n1', text: 'Salve'),
   );
 
-  print('Outbox rows before sync: ${outboxStore.pendingCount}');
+  print('Outbox rows before sync: ${server.outboxStore.pendingCount}');
   print(
     'Sync triggers: ${triggerSink.reasons.map((reason) => reason.name).join(', ')}',
   );
 
   server.queueRemoteNote(const Note(id: 'n2', text: 'Remote hello'));
 
+  // Sync: push pending commands, pull server changes, apply them, commit results.
   print('Run sync');
-  await runner.runOnce(SyncTriggerReason.localWriteCommitted);
+  await runtime.runner.runOnce(SyncTriggerReason.localWriteCommitted);
 
-  print('Outbox rows after sync: ${outboxStore.unsettledCount}');
+  print('Outbox rows after sync: ${server.outboxStore.unsettledCount}');
   print(
-    'Last cursor: ${(await stateStore.readLastServerCursorOrZero()).value}',
+    'Last cursor: ${(await server.stateStore.readLastServerCursorOrZero()).value}',
   );
   print('Local notes: ${notesStore.describe()}');
 }
@@ -112,8 +99,58 @@ final CommandPayloadCodec<CreateNoteCommand> createNoteCommandCodec =
       toJson: (CreateNoteCommand command) => command.toJson(),
     );
 
+/// Module registration that wires up a single notes module.
+class NotesSyncModule implements SyncModuleRegistration {
+  NotesSyncModule({
+    required this.outboxStore,
+    required this.stateStore,
+    required this.notesStore,
+  });
+
+  final SyncOutboxStore outboxStore;
+  final SyncStateStore stateStore;
+  final InMemoryNotesStore notesStore;
+
+  @override
+  String get moduleId => 'notes';
+
+  @override
+  List<AnyCommandCodec> get commandCodecs => [createNoteCommandCodec];
+
+  @override
+  List<SyncTableChangeHandler> get tableChangeHandlers => [
+    NotesTableChangeHandler(notesStore),
+  ];
+
+  @override
+  List<StaleConflictProfile> get staleConflictProfiles => [];
+
+  @override
+  LocalDataScope get localDataScope => NotesLocalDataScope(notesStore);
+
+  @override
+  RebuildGraph get rebuildGraph => RebuildGraph(nodes: []);
+}
+
+class NotesLocalDataScope implements LocalDataScope {
+  NotesLocalDataScope(this._store);
+
+  final InMemoryNotesStore _store;
+
+  @override
+  String get id => 'notes';
+
+  @override
+  Future<bool> hasData() async => _store.isNotEmpty;
+
+  @override
+  Future<void> clear() async => _store.clear();
+}
+
 class InMemoryNotesStore {
   final Map<String, Note> _notesById = <String, Note>{};
+
+  bool get isNotEmpty => _notesById.isNotEmpty;
 
   Future<void> upsert(Note note) async {
     _notesById[note.id] = note;
@@ -121,6 +158,10 @@ class InMemoryNotesStore {
 
   Future<void> delete(String id) async {
     _notesById.remove(id);
+  }
+
+  Future<void> clear() async {
+    _notesById.clear();
   }
 
   String describe() {
@@ -149,9 +190,12 @@ class NotesTableChangeHandler implements SyncTableChangeHandler {
   }
 }
 
+/// In-memory transport + persistence for the example.
 class InMemoryNotesServer implements SyncTransport {
   final Map<String, Note> _notesById = <String, Note>{};
   final List<ServerChange> _feed = <ServerChange>[];
+  final InMemoryOutboxStore outboxStore = InMemoryOutboxStore();
+  final InMemorySyncStateStore stateStore = InMemorySyncStateStore();
   int _cursor = 0;
 
   void queueRemoteNote(Note note) {

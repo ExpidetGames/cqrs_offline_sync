@@ -2,7 +2,7 @@ import '../commands/command_codec_registry.dart';
 import '../runtime/change_applier/sync_table_change_handler.dart';
 import '../runtime/conflict/stale_conflict_profile.dart';
 import '../runtime/rebuild/rebuild_graph.dart';
-import 'auth/local_data_scope.dart';
+import 'local_data/local_data_scope.dart';
 
 /// Contract that each syncable module must implement to participate in sync.
 ///

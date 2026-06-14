@@ -1,9 +1,7 @@
 import '../commands/sync_command.dart';
 import '../outbox/sync_command_writer.dart';
+import '../persistence/sync_transaction_runner.dart';
 import 'sync_trigger_sink.dart';
-
-typedef SyncTransactionRunner =
-    Future<T> Function<T>(Future<T> Function() action);
 
 /// Coordinates one local write transaction with outbox command creation.
 ///

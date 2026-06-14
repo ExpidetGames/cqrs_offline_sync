@@ -174,6 +174,7 @@ class SyncCommandResult {
     required this.opId,
     required this.status,
     required this.latestCursor,
+    this.reasonCode,
     this.reason,
     this.latestRow,
   });
@@ -184,7 +185,15 @@ class SyncCommandResult {
   /// Server-evaluated status.
   final SyncCommandResultStatus status;
 
-  /// Optional human-readable reason (often used for errors).
+  /// Optional stable machine-readable reason code for automated routing.
+  ///
+  /// Use this instead of parsing [reason] for new machine logic. See
+  /// [SyncCommandResultReasonCodes] for defined values.
+  final String? reasonCode;
+
+  /// Optional human-readable reason (often used for errors or diagnostics).
+  ///
+  /// New machine-readable routing logic should prefer [reasonCode].
   final String? reason;
 
   /// Highest server cursor at the time this result was produced.
@@ -197,6 +206,7 @@ class SyncCommandResult {
     return <String, dynamic>{
       'opId': opId,
       'status': status.toString(),
+      if (reasonCode != null) 'reasonCode': reasonCode,
       if (reason != null) 'reason': reason,
       'latestCursor': latestCursor.value,
       if (latestRow != null) 'latestRow': latestRow,
@@ -209,6 +219,7 @@ class SyncCommandResult {
       json['status'],
       fallback: SyncCommandResultStatus.retryableError.toString(),
     );
+    final reasonCode = asStringOr(json['reasonCode'], fallback: '');
     final reason = asStringOr(json['reason'], fallback: '');
     final latestCursorRaw = asStringOr(json['latestCursor'], fallback: '');
     if (latestCursorRaw.isEmpty) {
@@ -222,6 +233,7 @@ class SyncCommandResult {
     return SyncCommandResult(
       opId: opId,
       status: SyncCommandResultStatus.fromString(statusWire),
+      reasonCode: reasonCode.isEmpty ? null : reasonCode,
       reason: reason.isEmpty ? null : reason,
       latestCursor: SyncCursor(latestCursorRaw),
       latestRow: latestRow.isEmpty ? null : latestRow,

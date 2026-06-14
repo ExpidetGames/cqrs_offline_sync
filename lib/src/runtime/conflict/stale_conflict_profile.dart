@@ -71,6 +71,14 @@ abstract interface class StaleConflictProfile {
   /// Use `'*'` as a wildcard fallback.
   String get commandType;
 
+  /// Whether resolving stale conflicts for this profile requires a real
+  /// [SyncRebuildInstructionStore] (i.e. delete-rebuild instructions must be
+  /// captured during change application).
+  ///
+  /// Defaults to `false`. Profiles that inspect rebuild instructions should
+  /// override this to `true`.
+  bool get requiresRebuildInstructions;
+
   /// Resolves a stale command in [context] into a [ResolutionDecision].
   Future<ResolutionDecision<SyncCommand>> resolve(
     StaleConflictProfileContext context,

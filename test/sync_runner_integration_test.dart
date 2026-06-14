@@ -150,6 +150,56 @@ void main() {
       expect(handler.applied, isEmpty);
     });
 
+    test('paginates while response signals hasMore', () async {
+      final outbox = InMemorySyncOutboxStore();
+      final state = InMemorySyncStateStore();
+      final transport = FakeSyncServerTransport();
+      final handler = RecordingTableChangeHandler();
+      final envelopeFactory = testEnvelopeFactory();
+
+      await outbox.appendPayload(
+        const TestCommand(id: 'local-1'),
+        envelopeFactory: envelopeFactory,
+      );
+
+      transport.respond = (request) {
+        if (request.sinceCursor == SyncCursor('0')) {
+          return SyncBatchResponse(
+            commandResults: <SyncCommandResult>[
+              SyncCommandResult(
+                opId: 'op-1',
+                status: SyncCommandResultStatus.applied,
+                latestCursor: SyncCursor('5'),
+              ),
+            ],
+            changes: const <ServerChange>[],
+            newCursor: SyncCursor('5'),
+            hasMore: true,
+          );
+        }
+
+        return SyncBatchResponse(
+          commandResults: const <SyncCommandResult>[],
+          changes: const <ServerChange>[],
+          newCursor: SyncCursor('10'),
+        );
+      };
+
+      await _runner(
+        outbox: outbox,
+        state: state,
+        transport: transport,
+        handler: handler,
+        envelopeFactory: envelopeFactory,
+      ).runOnce(SyncTriggerReason.manual);
+
+      expect(transport.requests, hasLength(2));
+      expect(transport.requests.first.sinceCursor, SyncCursor('0'));
+      expect(transport.requests.last.sinceCursor, SyncCursor('5'));
+      expect(state.cursor, SyncCursor('10'));
+      expect(outbox.ackedRows.map((row) => row.envelope.opId), <String>['op-1']);
+    });
+
     test(
       'recovers abandoned in-flight rows before selecting the next batch',
       () async {

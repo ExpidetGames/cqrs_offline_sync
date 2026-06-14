@@ -103,6 +103,121 @@ sync example.
 - Conflict resolution commits one action per in-flight command in the batch.
 - Rebuild instructions clear only when no unsettled outbox commands remain.
 
+## CLI
+
+The package includes a small boilerplate generator named `cqrs_sync`.
+
+Run it from a host project root:
+
+```bash
+dart run cqrs_offline_sync:cqrs_sync --help
+```
+
+If the package is used through a local path dependency, the same command works
+after the host project has run `dart pub get` or `flutter pub get`.
+
+### Initialize Sync Files
+
+```bash
+dart run cqrs_offline_sync:cqrs_sync init \
+  --root lib/sync \
+  --project my_app
+```
+
+This creates:
+
+- `sync_config.yaml` in the current project.
+- The sync folder tree under `--root`.
+- README stubs for commands, runtime change application, conflict profiles,
+  auth, rebuild, outbox, providers, and database folders.
+
+Options:
+
+- `--root`, `-r`: sync file root. Defaults to `lib/sync`.
+- `--project`, `-p`: Dart package name used in generated imports. Defaults to
+  `my_app`.
+
+`init` aborts if `sync_config.yaml` already exists.
+
+### Register A Module
+
+```bash
+dart run cqrs_offline_sync:cqrs_sync create module notes \
+  --database-class NotesDatabase
+```
+
+This updates `sync_config.yaml` and creates module-local sync stubs under the
+configured sync root:
+
+- `notes_sync_registration.dart`
+- `runtime/auth/notes_local_data_scope.dart`
+- `runtime/rebuild/notes_rebuild_graph.dart`
+- `runtime/conflict/profiles/notes/notes_stale_conflict_profiles.dart`
+- module folders for commands, change handlers, conflict models, and snapshots
+
+Options:
+
+- `--database-class`, `-d`: Dart database class for the module. Defaults to the
+  PascalCase module name plus `Database`, for example `NotesDatabase`.
+
+### Generate A Command
+
+```bash
+dart run cqrs_offline_sync:cqrs_sync create command notes note create \
+  --fields "text:String,updatedAt:DateTime"
+```
+
+This creates a Dart command payload and codec file under:
+
+```text
+<sync_root>/commands/notes_commands/create_note_command.dart
+```
+
+It also regenerates `notes_sync_registration.dart` so the new codec appears in
+the module's `commandCodecs` list.
+
+The generated command always includes an `id:String` field. Additional fields
+come from `--fields` as comma-separated `name:Type` pairs.
+
+Options:
+
+- `--fields`, `-f`: additional payload fields, for example
+  `"title:String,count:int"`.
+- `--backend`: generate backend TypeScript files too. Enabled by default.
+- `--no-backend`: skip backend TypeScript generation.
+
+Backend files are generated only when `sync_config.yaml` contains `backend_root`.
+`init` does not set this field yet; add it manually when the host project has a
+backend command tree:
+
+```yaml
+sync_root: lib/sync
+project_package: my_app
+backend_root: supabase/functions/sync-v2
+```
+
+With `backend_root` set, command generation writes TypeScript stubs under:
+
+```text
+<backend_root>/commands/modules/<module>/<entity>/<operation>_<entity>/
+```
+
+Generated TypeScript files include:
+
+- `<operation>_<entity>_command.ts`
+- `<operation>_<entity>_handler.ts`
+- `<operation>_<entity>_stale_policy.ts`
+- `<operation>_<entity>_definition.ts`
+
+### Current CLI Limits
+
+- The CLI writes starter boilerplate; generated files still need domain-specific
+  table handlers, rebuild graph mappings, stale conflict policy, and backend
+  handler implementation.
+- The CLI does not update a backend command catalog automatically.
+- The CLI does not add package dependencies or run code generation.
+- The CLI is intended for internal acceleration, not a polished public workflow.
+
 ## More Detail
 
 - `doc/architecture.md` explains the package module, interface, seams, adapters,

@@ -16,7 +16,7 @@ import 'sync_table_change_handler.dart';
 /// [DeleteRebuildPlanner] before the handler processes the change.
 class CompositeServerChangeApplier implements ServerChangeApplier {
   CompositeServerChangeApplier({
-    required List<SyncTableChangeHandler> handlers,
+    required Iterable<SyncTableChangeHandler> handlers,
     ServerChangeDecisionPolicy decisionPolicy = const AlwaysApplyServerChangeDecisionPolicy(),
     DeleteRebuildPlanner? deleteRebuildPlanner,
     SyncRebuildInstructionStore? rebuildInstructionStore,
@@ -86,12 +86,18 @@ class CompositeServerChangeApplier implements ServerChangeApplier {
     return planner.planForDelete(tableName: change.table, rowId: rowId);
   }
 
-  static Map<String, SyncTableChangeHandler> _buildHandlerMap(List<SyncTableChangeHandler> handlers) {
+  static Map<String, SyncTableChangeHandler> _buildHandlerMap(
+    Iterable<SyncTableChangeHandler> handlers,
+  ) {
     final Map<String, SyncTableChangeHandler> map = <String, SyncTableChangeHandler>{};
 
     for (final SyncTableChangeHandler handler in handlers) {
       if (map.containsKey(handler.tableName)) {
-        throw StateError('Duplicate SyncTableChangeHandler for table: ${handler.tableName}');
+        throw ArgumentError.value(
+          handlers,
+          'handlers',
+          'Duplicate SyncTableChangeHandler for table: ${handler.tableName}',
+        );
       }
       map[handler.tableName] = handler;
     }
